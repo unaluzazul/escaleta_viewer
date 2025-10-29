@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Escaleta - Visualizador</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #1a1a1a;
+            color: white;
+            overflow: hidden;
+            height: 100vh;
+        }
+        
+        .container {
+            display: flex;
+            height: 100vh;
+            padding: 20px;
+            gap: 20px;
+        }
+        
+        .escaleta-completa {
+            flex: 1;
+            background-color: #2a2a2a;
+            border-radius: 10px;
+            padding: 30px;
+            overflow-y: auto;
+        }
+        
+        .escaleta-completa h2 {
+            margin-bottom: 25px;
+            font-size: 32px;
+            color: #ffffff;
+            border-bottom: 3px solid #4a4a4a;
+            padding-bottom: 15px;
+        }
+        
+        .escaleta-item {
+            padding: 12px 15px;
+            margin-bottom: 8px;
+            border-radius: 5px;
+            font-size: 20px;
+            background-color: #3a3a3a;
+            transition: all 0.3s ease;
+        }
+        
+        .escaleta-item.actual {
+            background-color: #c41e3a;
+            font-weight: bold;
+            transform: scale(1.02);
+        }
+        
+        .escaleta-item.siguiente {
+            background-color: #1e5a9e;
+            font-weight: bold;
+        }
+        
+        .contenidos-destacados {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .contenido-box {
+            flex: 1;
+            border-radius: 10px;
+            padding: 40px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+        }
+        
+        .contenido-box.actual {
+            background-color: #c41e3a;
+        }
+        
+        .contenido-box.siguiente {
+            background-color: #1e5a9e;
+        }
+        
+        .contenido-box .label {
+            font-size: 28px;
+            font-weight: bold;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .contenido-box .texto {
+            font-size: 48px;
+            font-weight: bold;
+            line-height: 1.3;
+            width: 100%;
+        }
+        
+        .controles {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 15px 25px;
+            border-radius: 8px;
+            font-size: 16px;
+            display: none;
+        }
+        
+        .controles.visible {
+            display: block;
+        }
+        
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 24px;
+            color: white;
+            text-align: center;
+        }
+        
+        .estado-conexion {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            display: none;
+        }
+        
+        .estado-conexion.visible {
+            display: block;
+        }
+        
+        .estado-conexion.conectado {
+            color: #4ade80;
+        }
+        
+        .estado-conexion.error {
+            color: #f87171;
+        }
+    </style>
+</head>
+<body>
+    <div class="loading">Cargando escaleta desde Google Sheets...</div>
+    
+    <div class="estado-conexion">
+        <span id="estado-texto">Conectado</span>
+    </div>
+    
+    <div class="container" style="display: none;">
+        <div class="escaleta-completa">
+            <h2>ESCALETA COMPLETA</h2>
+            <div id="lista-escaleta"></div>
+        </div>
+        
+        <div class="contenidos-destacados">
+            <div class="contenido-box actual">
+                <div class="label">AHORA</div>
+                <div class="texto" id="contenido-actual"></div>
+            </div>
+            <div class="contenido-box siguiente">
+                <div class="label">SIGUIENTE</div>
+                <div class="texto" id="contenido-siguiente"></div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="controles">
+        <div>Usa ← → para navegar</div>
+        <div>Posición: <span id="posicion">1</span> de <span id="total">0</span></div>
+    </div>
+
+    <script>
+        let escaleta = [];
+        let posicionActual = 0;
+        let ultimaActualizacion = null;
+        
+        // URL del Google Sheet publicado
+        const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQKI4RuLp8rCX2Effutz-KMw3ePHr0Of5k9QHboTxhrFvChu8IjF7Ax6I-hF4DzcgkSxS_Kn8yep_9Y/pub?output=csv';
+
+        async function cargarEscaleta() {
+            try {
+                // Añadir timestamp para evitar caché
+                const url = SHEET_URL + '&_t=' + new Date().getTime();
+                const response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error('Error al conectar con Google Sheets');
+                }
+                
+                const csvText = await response.text();
+                
+                // Parsear CSV - obtener solo la primera columna
+                const lineas = csvText.split('\n');
+                const nuevaEscaleta = [];
+                
+                for (let linea of lineas) {
+                    // Manejar comillas en CSV y obtener primera columna
+                    let contenido = linea.split(',')[0];
+                    // Quitar comillas al inicio y final si existen
+                    contenido = contenido.replace(/^["']|["']$/g, '').trim();
+                    
+                    if (contenido.length > 0) {
+                        nuevaEscaleta.push(contenido);
+                    }
+                }
+                
+                if (nuevaEscaleta.length === 0) {
+                    throw new Error('No se encontraron contenidos en la escaleta');
+                }
+                
+                // Solo actualizar si hay cambios
+                const hayNuevosDatos = JSON.stringify(escaleta) !== JSON.stringify(nuevaEscaleta);
+                
+                if (hayNuevosDatos || escaleta.length === 0) {
+                    escaleta = nuevaEscaleta;
+                    
+                    // Primera carga
+                    if (document.querySelector('.loading').style.display !== 'none') {
+                        document.querySelector('.loading').style.display = 'none';
+                        document.querySelector('.container').style.display = 'flex';
+                    }
+                    
+                    renderizarEscaleta();
+                    actualizarVista();
+                }
+                
+                // Actualizar estado de conexión
+                mostrarEstado('Conectado ✓', 'conectado');
+                ultimaActualizacion = new Date();
+                
+            } catch (error) {
+                console.error('Error al cargar la escaleta:', error);
+                
+                // Si es la primera carga, mostrar error
+                if (escaleta.length === 0) {
+                    document.querySelector('.loading').innerHTML = `
+                        <div style="max-width: 600px;">
+                            <h2>Error al cargar la escaleta</h2><br>
+                            <p>${error.message}</p><br>
+                            <small>Verifica que el Google Sheet esté publicado correctamente.<br><br>
+                            <strong>Datos de respaldo cargados.</strong></small>
+                        </div>
+                    `;
+                    
+                    // Cargar datos de respaldo
+                    cargarDatosRespaldo();
+                } else {
+                    // Si ya había datos cargados, solo mostrar aviso
+                    mostrarEstado('Error de conexión', 'error');
+                }
+            }
+        }
+        
+        function cargarDatosRespaldo() {
+            // Datos de respaldo por si falla la conexión
+            escaleta = [
+                "PRESENTACIÓN",
+                "MOVILIDADE ARTICULAR",
+                "QUECEMENTO",
+                "XEONLLOS ARRIBA-30S",
+                "XEONLLOS CÓBADO CONTRARIO-30S",
+                "AGACHAMENTO, TORSIÓN CINTURA ELEVANDO BRAZOS-5 A CADA LADO",
+                "PRESENTA ENTRENAMENTO: HOXE IMOS TRABALLAR…",
+                "AGACHAMENTO RUSO 2X10",
+                "\"THRUSTERS\" AGACHAMENTO CON HALTERE DE MANS (MANCUERNAS) E O SUBIR SUBIMOS OS BRAZOS ARRIBA- 10 REPES",
+                "AGACHAMENTO LATERAL: 2X10 cada lado",
+                "APERTURAS LATERAIS CON HALTERE DE MANS- 10 REPES",
+                "ELEVACIÓN CADEIRAS: 2X10",
+                "ELEVACIÓN CADEIRAS ISOMÉTRICA: 30S",
+                "ELEVACIÓN CADEIRAS MANTENDO ARRIBA E APERTURA BRAZOS CON HALTERE DE MANS: 15 REPES",
+                "ESTIRAMENTOS"
+            ];
+            
+            document.querySelector('.loading').style.display = 'none';
+            document.querySelector('.container').style.display = 'flex';
+            renderizarEscaleta();
+            actualizarVista();
+            mostrarEstado('Usando datos de respaldo', 'error');
+        }
+        
+        function mostrarEstado(texto, clase) {
+            const estadoDiv = document.querySelector('.estado-conexion');
+            const estadoTexto = document.getElementById('estado-texto');
+            
+            estadoTexto.textContent = texto;
+            estadoDiv.className = 'estado-conexion visible ' + clase;
+            
+            // Ocultar después de 3 segundos
+            setTimeout(() => {
+                estadoDiv.classList.remove('visible');
+            }, 3000);
+        }
+
+        function renderizarEscaleta() {
+            const listaEscaleta = document.getElementById('lista-escaleta');
+            listaEscaleta.innerHTML = '';
+            
+            escaleta.forEach((item, index) => {
+                const div = document.createElement('div');
+                div.className = 'escaleta-item';
+                div.textContent = `${index + 1}. ${item}`;
+                div.id = `item-${index}`;
+                listaEscaleta.appendChild(div);
+            });
+            
+            document.getElementById('total').textContent = escaleta.length;
+        }
+
+        function actualizarVista() {
+            // Actualizar contenidos destacados
+            const textoActual = escaleta[posicionActual] || 'FIN';
+            const textoSiguiente = escaleta[posicionActual + 1] || 'FIN DEL PROGRAMA';
+            
+            const elementoActual = document.getElementById('contenido-actual');
+            const elementoSiguiente = document.getElementById('contenido-siguiente');
+            
+            elementoActual.textContent = textoActual;
+            elementoSiguiente.textContent = textoSiguiente;
+            
+            // Ajustar tamaño de fuente dinámicamente
+            ajustarTamanoTexto(elementoActual, textoActual);
+            ajustarTamanoTexto(elementoSiguiente, textoSiguiente);
+            
+            // Actualizar estilos en la lista completa
+            escaleta.forEach((item, index) => {
+                const elemento = document.getElementById(`item-${index}`);
+                if (elemento) {
+                    elemento.classList.remove('actual', 'siguiente');
+                    
+                    if (index === posicionActual) {
+                        elemento.classList.add('actual');
+                        elemento.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    } else if (index === posicionActual + 1) {
+                        elemento.classList.add('siguiente');
+                    }
+                }
+            });
+            
+            // Actualizar posición
+            document.getElementById('posicion').textContent = posicionActual + 1;
+        }
+        
+        function ajustarTamanoTexto(elemento, texto) {
+            const longitud = texto.length;
+            let tamano;
+            
+            // Escala dinámica según longitud del texto
+            if (longitud <= 20) {
+                tamano = 56; // Muy corto - muy grande
+            } else if (longitud <= 40) {
+                tamano = 48; // Corto - grande
+            } else if (longitud <= 70) {
+                tamano = 40; // Medio - mediano
+            } else if (longitud <= 100) {
+                tamano = 34; // Largo - más pequeño
+            } else {
+                tamano = 28; // Muy largo - pequeño
+            }
+            
+            elemento.style.fontSize = tamano + 'px';
+        }
+
+        function avanzar() {
+            if (posicionActual < escaleta.length - 1) {
+                posicionActual++;
+                actualizarVista();
+            }
+        }
+
+        function retroceder() {
+            if (posicionActual > 0) {
+                posicionActual--;
+                actualizarVista();
+            }
+        }
+
+        // Control por teclado
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
+                e.preventDefault();
+                avanzar();
+            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                retroceder();
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                posicionActual = 0;
+                actualizarVista();
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                posicionActual = escaleta.length - 1;
+                actualizarVista();
+            } else if (e.key === 'r' || e.key === 'R') {
+                e.preventDefault();
+                cargarEscaleta();
+                mostrarEstado('Recargando...', 'conectado');
+            }
+        });
+
+        // Mostrar controles al mover el ratón
+        let timeoutControles;
+        document.addEventListener('mousemove', () => {
+            document.querySelector('.controles').classList.add('visible');
+            clearTimeout(timeoutControles);
+            timeoutControles = setTimeout(() => {
+                document.querySelector('.controles').classList.remove('visible');
+            }, 3000);
+        });
+
+        // Cargar al inicio
+        cargarEscaleta();
+        
+        // Recargar cada 30 segundos para captar cambios en el Sheet
+        setInterval(cargarEscaleta, 30000);
+    </script>
+</body>
+</html>
