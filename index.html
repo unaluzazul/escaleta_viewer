@@ -1,399 +1,431 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Escaleta - Visualizador</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Arial', sans-serif;
-            background-color: #1a1a1a;
-            color: white;
-            overflow: hidden;
-            height: 100vh;
-        }
-        
-        .container {
-            display: flex;
-            height: 100vh;
-            padding: 20px;
-            gap: 20px;
-        }
-        
-        .escaleta-completa {
-            flex: 1;
-            background-color: #2a2a2a;
-            border-radius: 10px;
-            padding: 30px;
-            overflow-y: auto;
-        }
-        
-        .escaleta-completa h2 {
-            margin-bottom: 25px;
-            font-size: 32px;
-            color: #ffffff;
-            border-bottom: 3px solid #4a4a4a;
-            padding-bottom: 15px;
-        }
-        
-        .escaleta-item {
-            padding: 12px 15px;
-            margin-bottom: 8px;
-            border-radius: 5px;
-            font-size: 20px;
-            background-color: #3a3a3a;
-            transition: all 0.3s ease;
-        }
-        
-        .escaleta-item.actual {
-            background-color: #c41e3a;
-            font-weight: bold;
-            transform: scale(1.02);
-        }
-        
-        .escaleta-item.siguiente {
-            background-color: #1e5a9e;
-            font-weight: bold;
-        }
-        
-        .contenidos-destacados {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-        
-        .contenido-box {
-            flex: 1;
-            border-radius: 10px;
-            padding: 40px;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            text-align: center;
-        }
-        
-        .contenido-box.actual {
-            background-color: #c41e3a;
-        }
-        
-        .contenido-box.siguiente {
-            background-color: #1e5a9e;
-        }
-        
-        .contenido-box .label {
-            font-size: 28px;
-            font-weight: bold;
-            margin-bottom: 20px;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-        }
-        
-        .contenido-box .texto {
-            font-size: 36px;
-            font-weight: bold;
-            line-height: 1.4;
-        }
-        
-        .controles {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            background-color: rgba(0, 0, 0, 0.7);
-            padding: 15px 25px;
-            border-radius: 8px;
-            font-size: 16px;
-            display: none;
-        }
-        
-        .controles.visible {
-            display: block;
-        }
-        
-        .loading {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 24px;
-            color: white;
-            text-align: center;
-        }
-        
-        .estado-conexion {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            background-color: rgba(0, 0, 0, 0.7);
-            padding: 10px 20px;
-            border-radius: 8px;
-            font-size: 14px;
-            display: none;
-        }
-        
-        .estado-conexion.visible {
-            display: block;
-        }
-        
-        .estado-conexion.conectado {
-            color: #4ade80;
-        }
-        
-        .estado-conexion.error {
-            color: #f87171;
-        }
-    </style>
-</head>
-<body>
-    <div class="loading">Cargando escaleta desde Google Sheets...</div>
-    
-    <div class="estado-conexion">
-        <span id="estado-texto">Conectado</span>
-    </div>
-    
-    <div class="container" style="display: none;">
-        <div class="escaleta-completa">
-            <h2>ESCALETA COMPLETA</h2>
-            <div id="lista-escaleta"></div>
-        </div>
-        
-        <div class="contenidos-destacados">
-            <div class="contenido-box actual">
-                <div class="label">AHORA</div>
-                <div class="texto" id="contenido-actual"></div>
-            </div>
-            <div class="contenido-box siguiente">
-                <div class="label">SIGUIENTE</div>
-                <div class="texto" id="contenido-siguiente"></div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="controles">
-        <div>Usa ← → para navegar</div>
-        <div>Posición: <span id="posicion">1</span> de <span id="total">0</span></div>
-    </div>
-
-    <script>
-        let escaleta = [];
-        let posicionActual = 0;
-        let ultimaActualizacion = null;
-        
-        // URL del Google Sheet publicado
-        const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQKI4RuLp8rCX2Effutz-KMw3ePHr0Of5k9QHboTxhrFvChu8IjF7Ax6I-hF4DzcgkSxS_Kn8yep_9Y/pub?output=csv';
-
-        async function cargarEscaleta() {
-            try {
-                // Añadir timestamp para evitar caché
-                const url = SHEET_URL + '&_t=' + new Date().getTime();
-                const response = await fetch(url);
-                
-                if (!response.ok) {
-                    throw new Error('Error al conectar con Google Sheets');
-                }
-                
-                const csvText = await response.text();
-                
-                // Parsear CSV - obtener solo la primera columna
-                const lineas = csvText.split('\n');
-                const nuevaEscaleta = [];
-                
-                for (let linea of lineas) {
-                    // Manejar comillas en CSV y obtener primera columna
-                    let contenido = linea.split(',')[0];
-                    // Quitar comillas al inicio y final si existen
-                    contenido = contenido.replace(/^["']|["']$/g, '').trim();
-                    
-                    if (contenido.length > 0) {
-                        nuevaEscaleta.push(contenido);
-                    }
-                }
-                
-                if (nuevaEscaleta.length === 0) {
-                    throw new Error('No se encontraron contenidos en la escaleta');
-                }
-                
-                // Solo actualizar si hay cambios
-                const hayNuevosDatos = JSON.stringify(escaleta) !== JSON.stringify(nuevaEscaleta);
-                
-                if (hayNuevosDatos || escaleta.length === 0) {
-                    escaleta = nuevaEscaleta;
-                    
-                    // Primera carga
-                    if (document.querySelector('.loading').style.display !== 'none') {
-                        document.querySelector('.loading').style.display = 'none';
-                        document.querySelector('.container').style.display = 'flex';
-                    }
-                    
-                    renderizarEscaleta();
-                    actualizarVista();
-                }
-                
-                // Actualizar estado de conexión
-                mostrarEstado('Conectado ✓', 'conectado');
-                ultimaActualizacion = new Date();
-                
-            } catch (error) {
-                console.error('Error al cargar la escaleta:', error);
-                
-                // Si es la primera carga, mostrar error
-                if (escaleta.length === 0) {
-                    document.querySelector('.loading').innerHTML = `
-                        <div style="max-width: 600px;">
-                            <h2>Error al cargar la escaleta</h2><br>
-                            <p>${error.message}</p><br>
-                            <small>Verifica que el Google Sheet esté publicado correctamente.<br><br>
-                            <strong>Datos de respaldo cargados.</strong></small>
-                        </div>
-                    `;
-                    
-                    // Cargar datos de respaldo
-                    cargarDatosRespaldo();
-                } else {
-                    // Si ya había datos cargados, solo mostrar aviso
-                    mostrarEstado('Error de conexión', 'error');
-                }
-            }
-        }
-        
-        function cargarDatosRespaldo() {
-            // Datos de respaldo por si falla la conexión
-            escaleta = [
-                "PRESENTACIÓN",
-                "MOVILIDADE ARTICULAR",
-                "QUECEMENTO",
-                "XEONLLOS ARRIBA-30S",
-                "XEONLLOS CÓBADO CONTRARIO-30S",
-                "AGACHAMENTO, TORSIÓN CINTURA ELEVANDO BRAZOS-5 A CADA LADO",
-                "PRESENTA ENTRENAMENTO: HOXE IMOS TRABALLAR…",
-                "AGACHAMENTO RUSO 2X10",
-                "\"THRUSTERS\" AGACHAMENTO CON HALTERE DE MANS (MANCUERNAS) E O SUBIR SUBIMOS OS BRAZOS ARRIBA- 10 REPES",
-                "AGACHAMENTO LATERAL: 2X10 cada lado",
-                "APERTURAS LATERAIS CON HALTERE DE MANS- 10 REPES",
-                "ELEVACIÓN CADEIRAS: 2X10",
-                "ELEVACIÓN CADEIRAS ISOMÉTRICA: 30S",
-                "ELEVACIÓN CADEIRAS MANTENDO ARRIBA E APERTURA BRAZOS CON HALTERE DE MANS: 15 REPES",
-                "ESTIRAMENTOS"
-            ];
-            
-            document.querySelector('.loading').style.display = 'none';
-            document.querySelector('.container').style.display = 'flex';
-            renderizarEscaleta();
-            actualizarVista();
-            mostrarEstado('Usando datos de respaldo', 'error');
-        }
-        
-        function mostrarEstado(texto, clase) {
-            const estadoDiv = document.querySelector('.estado-conexion');
-            const estadoTexto = document.getElementById('estado-texto');
-            
-            estadoTexto.textContent = texto;
-            estadoDiv.className = 'estado-conexion visible ' + clase;
-            
-            // Ocultar después de 3 segundos
-            setTimeout(() => {
-                estadoDiv.classList.remove('visible');
-            }, 3000);
-        }
-
-        function renderizarEscaleta() {
-            const listaEscaleta = document.getElementById('lista-escaleta');
-            listaEscaleta.innerHTML = '';
-            
-            escaleta.forEach((item, index) => {
-                const div = document.createElement('div');
-                div.className = 'escaleta-item';
-                div.textContent = `${index + 1}. ${item}`;
-                div.id = `item-${index}`;
-                listaEscaleta.appendChild(div);
-            });
-            
-            document.getElementById('total').textContent = escaleta.length;
-        }
-
-        function actualizarVista() {
-            // Actualizar contenidos destacados
-            document.getElementById('contenido-actual').textContent = escaleta[posicionActual] || 'FIN';
-            document.getElementById('contenido-siguiente').textContent = escaleta[posicionActual + 1] || 'FIN DEL PROGRAMA';
-            
-            // Actualizar estilos en la lista completa
-            escaleta.forEach((item, index) => {
-                const elemento = document.getElementById(`item-${index}`);
-                if (elemento) {
-                    elemento.classList.remove('actual', 'siguiente');
-                    
-                    if (index === posicionActual) {
-                        elemento.classList.add('actual');
-                        elemento.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    } else if (index === posicionActual + 1) {
-                        elemento.classList.add('siguiente');
-                    }
-                }
-            });
-            
-            // Actualizar posición
-            document.getElementById('posicion').textContent = posicionActual + 1;
-        }
-
-        function avanzar() {
-            if (posicionActual < escaleta.length - 1) {
-                posicionActual++;
-                actualizarVista();
-            }
-        }
-
-        function retroceder() {
-            if (posicionActual > 0) {
-                posicionActual--;
-                actualizarVista();
-            }
-        }
-
-        // Control por teclado
-        document.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
-                e.preventDefault();
-                avanzar();
-            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-                e.preventDefault();
-                retroceder();
-            } else if (e.key === 'Home') {
-                e.preventDefault();
-                posicionActual = 0;
-                actualizarVista();
-            } else if (e.key === 'End') {
-                e.preventDefault();
-                posicionActual = escaleta.length - 1;
-                actualizarVista();
-            } else if (e.key === 'r' || e.key === 'R') {
-                e.preventDefault();
-                cargarEscaleta();
-                mostrarEstado('Recargando...', 'conectado');
-            }
-        });
-
-        // Mostrar controles al mover el ratón
-        let timeoutControles;
-        document.addEventListener('mousemove', () => {
-            document.querySelector('.controles').classList.add('visible');
-            clearTimeout(timeoutControles);
-            timeoutControles = setTimeout(() => {
-                document.querySelector('.controles').classList.remove('visible');
-            }, 3000);
-        });
-
-        // Cargar al inicio
-        cargarEscaleta();
-        
-        // Recargar cada 30 segundos para captar cambios en el Sheet
-        setInterval(cargarEscaleta, 30000);
-    </script>
-</body>
-</html>
+1<!DOCTYPE html>
+2<html lang="es">
+3<head>
+4    <meta charset="UTF-8">
+5    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+6    <title>Escaleta - Visualizador</title>
+7    <style>
+8        * {
+9            margin: 0;
+10            padding: 0;
+11            box-sizing: border-box;
+12        }
+13        
+14        body {
+15            font-family: 'Arial', sans-serif;
+16            background-color: #1a1a1a;
+17            color: white;
+18            overflow: hidden;
+19            height: 100vh;
+20        }
+21        
+22        .container {
+23            display: flex;
+24            height: 100vh;
+25            padding: 20px;
+26            gap: 20px;
+27        }
+28        
+29        .escaleta-completa {
+30            flex: 1;
+31            background-color: #2a2a2a;
+32            border-radius: 10px;
+33            padding: 30px;
+34            overflow-y: auto;
+35        }
+36        
+37        .escaleta-completa h2 {
+38            margin-bottom: 25px;
+39            font-size: 32px;
+40            color: #ffffff;
+41            border-bottom: 3px solid #4a4a4a;
+42            padding-bottom: 15px;
+43        }
+44        
+45        .escaleta-item {
+46            padding: 12px 15px;
+47            margin-bottom: 8px;
+48            border-radius: 5px;
+49            font-size: 20px;
+50            background-color: #3a3a3a;
+51            transition: all 0.3s ease;
+52        }
+53        
+54        .escaleta-item.actual {
+55            background-color: #c41e3a;
+56            font-weight: bold;
+57            transform: scale(1.02);
+58        }
+59        
+60        .escaleta-item.siguiente {
+61            background-color: #1e5a9e;
+62            font-weight: bold;
+63        }
+64        
+65        .contenidos-destacados {
+66            flex: 1;
+67            display: flex;
+68            flex-direction: column;
+69            gap: 20px;
+70        }
+71        
+72        .contenido-box {
+73            flex: 1;
+74            border-radius: 10px;
+75            padding: 40px;
+76            display: flex;
+77            flex-direction: column;
+78            justify-content: center;
+79            align-items: center;
+80            text-align: center;
+81        }
+82        
+83        .contenido-box.actual {
+84            background-color: #c41e3a;
+85        }
+86        
+87        .contenido-box.siguiente {
+88            background-color: #1e5a9e;
+89        }
+90        
+91        .contenido-box .label {
+92            font-size: 28px;
+93            font-weight: bold;
+94            margin-bottom: 20px;
+95            text-transform: uppercase;
+96            letter-spacing: 2px;
+97        }
+98        
+99        .contenido-box .texto {
+100            font-size: 48px;
+101            font-weight: bold;
+102            line-height: 1.3;
+103            width: 100%;
+104        }
+105        
+106        .controles {
+107            position: fixed;
+108            bottom: 20px;
+109            right: 20px;
+110            background-color: rgba(0, 0, 0, 0.7);
+111            padding: 15px 25px;
+112            border-radius: 8px;
+113            font-size: 16px;
+114            display: none;
+115        }
+116        
+117        .controles.visible {
+118            display: block;
+119        }
+120        
+121        .loading {
+122            position: fixed;
+123            top: 50%;
+124            left: 50%;
+125            transform: translate(-50%, -50%);
+126            font-size: 24px;
+127            color: white;
+128            text-align: center;
+129        }
+130        
+131        .estado-conexion {
+132            position: fixed;
+133            top: 20px;
+134            right: 20px;
+135            background-color: rgba(0, 0, 0, 0.7);
+136            padding: 10px 20px;
+137            border-radius: 8px;
+138            font-size: 14px;
+139            display: none;
+140        }
+141        
+142        .estado-conexion.visible {
+143            display: block;
+144        }
+145        
+146        .estado-conexion.conectado {
+147            color: #4ade80;
+148        }
+149        
+150        .estado-conexion.error {
+151            color: #f87171;
+152        }
+153    </style>
+154</head>
+155<body>
+156    <div class="loading">Cargando escaleta desde Google Sheets...</div>
+157    
+158    <div class="estado-conexion">
+159        <span id="estado-texto">Conectado</span>
+160    </div>
+161    
+162    <div class="container" style="display: none;">
+163        <div class="escaleta-completa">
+164            <h2>ESCALETA COMPLETA</h2>
+165            <div id="lista-escaleta"></div>
+166        </div>
+167        
+168        <div class="contenidos-destacados">
+169            <div class="contenido-box actual">
+170                <div class="label">AHORA</div>
+171                <div class="texto" id="contenido-actual"></div>
+172            </div>
+173            <div class="contenido-box siguiente">
+174                <div class="label">SIGUIENTE</div>
+175                <div class="texto" id="contenido-siguiente"></div>
+176            </div>
+177        </div>
+178    </div>
+179    
+180    <div class="controles">
+181        <div>Usa ← → para navegar</div>
+182        <div>Posición: <span id="posicion">1</span> de <span id="total">0</span></div>
+183    </div>
+184
+185    <script>
+186        let escaleta = [];
+187        let posicionActual = 0;
+188        let ultimaActualizacion = null;
+189        
+190        // URL del Google Sheet publicado
+191        const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQKI4RuLp8rCX2Effutz-KMw3ePHr0Of5k9QHboTxhrFvChu8IjF7Ax6I-hF4DzcgkSxS_Kn8yep_9Y/pub?output=csv';
+192
+193        async function cargarEscaleta() {
+194            try {
+195                // Añadir timestamp para evitar caché
+196                const url = SHEET_URL + '&_t=' + new Date().getTime();
+197                const response = await fetch(url);
+198                
+199                if (!response.ok) {
+200                    throw new Error('Error al conectar con Google Sheets');
+201                }
+202                
+203                const csvText = await response.text();
+204                
+205                // Parsear CSV - obtener solo la primera columna
+206                const lineas = csvText.split('\n');
+207                const nuevaEscaleta = [];
+208                
+209                for (let linea of lineas) {
+210                    // Manejar comillas en CSV y obtener primera columna
+211                    let contenido = linea.split(',')[0];
+212                    // Quitar comillas al inicio y final si existen
+213                    contenido = contenido.replace(/^["']|["']$/g, '').trim();
+214                    
+215                    if (contenido.length > 0) {
+216                        nuevaEscaleta.push(contenido);
+217                    }
+218                }
+219                
+220                if (nuevaEscaleta.length === 0) {
+221                    throw new Error('No se encontraron contenidos en la escaleta');
+222                }
+223                
+224                // Solo actualizar si hay cambios
+225                const hayNuevosDatos = JSON.stringify(escaleta) !== JSON.stringify(nuevaEscaleta);
+226                
+227                if (hayNuevosDatos || escaleta.length === 0) {
+228                    escaleta = nuevaEscaleta;
+229                    
+230                    // Primera carga
+231                    if (document.querySelector('.loading').style.display !== 'none') {
+232                        document.querySelector('.loading').style.display = 'none';
+233                        document.querySelector('.container').style.display = 'flex';
+234                    }
+235                    
+236                    renderizarEscaleta();
+237                    actualizarVista();
+238                }
+239                
+240                // Actualizar estado de conexión
+241                mostrarEstado('Conectado ✓', 'conectado');
+242                ultimaActualizacion = new Date();
+243                
+244            } catch (error) {
+245                console.error('Error al cargar la escaleta:', error);
+246                
+247                // Si es la primera carga, mostrar error
+248                if (escaleta.length === 0) {
+249                    document.querySelector('.loading').innerHTML = `
+250                        <div style="max-width: 600px;">
+251                            <h2>Error al cargar la escaleta</h2><br>
+252                            <p>${error.message}</p><br>
+253                            <small>Verifica que el Google Sheet esté publicado correctamente.<br><br>
+254                            <strong>Datos de respaldo cargados.</strong></small>
+255                        </div>
+256                    `;
+257                    
+258                    // Cargar datos de respaldo
+259                    cargarDatosRespaldo();
+260                } else {
+261                    // Si ya había datos cargados, solo mostrar aviso
+262                    mostrarEstado('Error de conexión', 'error');
+263                }
+264            }
+265        }
+266        
+267        function cargarDatosRespaldo() {
+268            // Datos de respaldo por si falla la conexión
+269            escaleta = [
+270                "PRESENTACIÓN",
+271                "MOVILIDADE ARTICULAR",
+272                "QUECEMENTO",
+273                "XEONLLOS ARRIBA-30S",
+274                "XEONLLOS CÓBADO CONTRARIO-30S",
+275                "AGACHAMENTO, TORSIÓN CINTURA ELEVANDO BRAZOS-5 A CADA LADO",
+276                "PRESENTA ENTRENAMENTO: HOXE IMOS TRABALLAR…",
+277                "AGACHAMENTO RUSO 2X10",
+278                "\"THRUSTERS\" AGACHAMENTO CON HALTERE DE MANS (MANCUERNAS) E O SUBIR SUBIMOS OS BRAZOS ARRIBA- 10 REPES",
+279                "AGACHAMENTO LATERAL: 2X10 cada lado",
+280                "APERTURAS LATERAIS CON HALTERE DE MANS- 10 REPES",
+281                "ELEVACIÓN CADEIRAS: 2X10",
+282                "ELEVACIÓN CADEIRAS ISOMÉTRICA: 30S",
+283                "ELEVACIÓN CADEIRAS MANTENDO ARRIBA E APERTURA BRAZOS CON HALTERE DE MANS: 15 REPES",
+284                "ESTIRAMENTOS"
+285            ];
+286            
+287            document.querySelector('.loading').style.display = 'none';
+288            document.querySelector('.container').style.display = 'flex';
+289            renderizarEscaleta();
+290            actualizarVista();
+291            mostrarEstado('Usando datos de respaldo', 'error');
+292        }
+293        
+294        function mostrarEstado(texto, clase) {
+295            const estadoDiv = document.querySelector('.estado-conexion');
+296            const estadoTexto = document.getElementById('estado-texto');
+297            
+298            estadoTexto.textContent = texto;
+299            estadoDiv.className = 'estado-conexion visible ' + clase;
+300            
+301            // Ocultar después de 3 segundos
+302            setTimeout(() => {
+303                estadoDiv.classList.remove('visible');
+304            }, 3000);
+305        }
+306
+307        function renderizarEscaleta() {
+308            const listaEscaleta = document.getElementById('lista-escaleta');
+309            listaEscaleta.innerHTML = '';
+310            
+311            escaleta.forEach((item, index) => {
+312                const div = document.createElement('div');
+313                div.className = 'escaleta-item';
+314                div.textContent = `${index + 1}. ${item}`;
+315                div.id = `item-${index}`;
+316                listaEscaleta.appendChild(div);
+317            });
+318            
+319            document.getElementById('total').textContent = escaleta.length;
+320        }
+321
+322        function actualizarVista() {
+323            // Actualizar contenidos destacados
+324            const textoActual = escaleta[posicionActual] || 'FIN';
+325            const textoSiguiente = escaleta[posicionActual + 1] || 'FIN DEL PROGRAMA';
+326            
+327            const elementoActual = document.getElementById('contenido-actual');
+328            const elementoSiguiente = document.getElementById('contenido-siguiente');
+329            
+330            elementoActual.textContent = textoActual;
+331            elementoSiguiente.textContent = textoSiguiente;
+332            
+333            // Ajustar tamaño de fuente dinámicamente
+334            ajustarTamanoTexto(elementoActual, textoActual);
+335            ajustarTamanoTexto(elementoSiguiente, textoSiguiente);
+336            
+337            // Actualizar estilos en la lista completa
+338            escaleta.forEach((item, index) => {
+339                const elemento = document.getElementById(`item-${index}`);
+340                if (elemento) {
+341                    elemento.classList.remove('actual', 'siguiente');
+342                    
+343                    if (index === posicionActual) {
+344                        elemento.classList.add('actual');
+345                        elemento.scrollIntoView({ behavior: 'smooth', block: 'center' });
+346                    } else if (index === posicionActual + 1) {
+347                        elemento.classList.add('siguiente');
+348                    }
+349                }
+350            });
+351            
+352            // Actualizar posición
+353            document.getElementById('posicion').textContent = posicionActual + 1;
+354        }
+355        
+356        function ajustarTamanoTexto(elemento, texto) {
+357            const longitud = texto.length;
+358            let tamano;
+359            
+360            // Escala dinámica según longitud del texto
+361            if (longitud <= 20) {
+362                tamano = 56; // Muy corto - muy grande
+363            } else if (longitud <= 40) {
+364                tamano = 48; // Corto - grande
+365            } else if (longitud <= 70) {
+366                tamano = 40; // Medio - mediano
+367            } else if (longitud <= 100) {
+368                tamano = 34; // Largo - más pequeño
+369            } else {
+370                tamano = 28; // Muy largo - pequeño
+371            }
+372            
+373            elemento.style.fontSize = tamano + 'px';
+374        }
+375
+376        function avanzar() {
+377            if (posicionActual < escaleta.length - 1) {
+378                posicionActual++;
+379                actualizarVista();
+380            }
+381        }
+382
+383        function retroceder() {
+384            if (posicionActual > 0) {
+385                posicionActual--;
+386                actualizarVista();
+387            }
+388        }
+389
+390        // Control por teclado
+391        document.addEventListener('keydown', (e) => {
+392            if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === ' ') {
+393                e.preventDefault();
+394                avanzar();
+395            } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+396                e.preventDefault();
+397                retroceder();
+398            } else if (e.key === 'Home') {
+399                e.preventDefault();
+400                posicionActual = 0;
+401                actualizarVista();
+402            } else if (e.key === 'End') {
+403                e.preventDefault();
+404                posicionActual = escaleta.length - 1;
+405                actualizarVista();
+406            } else if (e.key === 'r' || e.key === 'R') {
+407                e.preventDefault();
+408                cargarEscaleta();
+409                mostrarEstado('Recargando...', 'conectado');
+410            }
+411        });
+412
+413        // Mostrar controles al mover el ratón
+414        let timeoutControles;
+415        document.addEventListener('mousemove', () => {
+416            document.querySelector('.controles').classList.add('visible');
+417            clearTimeout(timeoutControles);
+418            timeoutControles = setTimeout(() => {
+419                document.querySelector('.controles').classList.remove('visible');
+420            }, 3000);
+421        });
+422
+423        // Cargar al inicio
+424        cargarEscaleta();
+425        
+426        // Recargar cada 30 segundos para captar cambios en el Sheet
+427        setInterval(cargarEscaleta, 30000);
+428    </script>
+429</body>
+430</html>
+431
